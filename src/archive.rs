@@ -1,7 +1,7 @@
 //! This module contains things relating to reading and writing to archive file
 
 use std::{
-    fs::OpenOptions,
+    fs::{self, OpenOptions},
     io::{BufWriter, Seek, SeekFrom, Write},
     path::Path,
 };
@@ -24,7 +24,14 @@ pub fn archive_value(data_dir: &Path, value: Value) -> anyhow::Result<()> {
         .context("formatting now for archive filename")?;
     // 2024-06-19-19-22-45
     now = now.replace(':', "-").replace('Z', "");
-    let archive_file_path = data_dir.join(format!("archive.{now}.bin"));
+    let archive_file_path = data_dir.join(format!("archived/{now}.bin"));
+
+    fs::create_dir_all(
+        archive_file_path
+            .parent()
+            .expect("path created with parent"),
+    )
+    .context("creating 'archived' folder if not present")?;
 
     // Choosing to ignore AlreadyExists errors, it should be retried by the caller
     // TODO: Could improve this by adding a `.{counter}` to the filename, but

@@ -154,6 +154,10 @@ impl State {
         // Drop the append-only staging file reference if it exists
         drop(self.staging_file.take());
 
+        // Set the added bytes to be zero since we just closed out the
+        // staging file
+        self.added_bytes = 0;
+
         let staging_value = StagingFileReader::read_merged_value(&self.data_dir)
             .context("opening staging file for archiving")?;
 

@@ -2,7 +2,7 @@
 
 use std::{
     fs::{self, OpenOptions},
-    io::{BufWriter, Seek, SeekFrom, Write},
+    io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write},
     path::Path,
 };
 
@@ -13,10 +13,37 @@ use zerocopy::{AsBytes, FromBytes, FromZeroes, Unaligned};
 
 use crate::value::Value;
 
+/// TODO
+pub fn read_archive_value(
+    archive_path: &Path,
+    scratch_buffer: &mut Vec<u8>,
+) -> anyhow::Result<Value> {
+    let start_index = scratch_buffer.len();
+
+    let archive_file = OpenOptions::new()
+        .read(true)
+        .open(archive_path)
+        .context("opening archive file for reading")?;
+
+    let mut reader = ArchiveReader::new(archive_file).context("starting to read archive")?;
+
+    reader
+        .read_to_end(scratch_buffer)
+        .context("reading content of archive file")?;
+
+    let body = &scratch_buffer[start_index..];
+
+    reader.metadata.assert_checksum(body)?;
+    let mut cbor_reader = minicbor::Decoder::new(body);
+    let value = cbor_reader.decode().context("decoding CBOR value")?;
+
+    Ok(value)
+}
+
 /// Write a new archive file to the given data directory, with the content of
 /// the given CBOR value.
 #[tracing::instrument(skip_all)]
-pub fn archive_value(data_dir: &Path, value: Value) -> anyhow::Result<()> {
+pub fn write_archive_value(data_dir: &Path, value: Value) -> anyhow::Result<()> {
     // 2024-06-19-19:22:45Z
     let mut now = String::with_capacity(20);
     DateTimePrinter::new()
@@ -76,6 +103,15 @@ struct Metadata {
 }
 
 impl Metadata {
+    fn from_reader(mut reader: impl BufRead) -> anyhow::Result<Self> {
+        let mut buf = Metadata::default();
+        reader
+            .read_exact(buf.as_bytes_mut())
+            .context("trying to read metadata")?;
+
+        Ok(buf)
+    }
+
     fn for_checksum(checksum: u32) -> Self {
         Self {
             magic: MAGIC,
@@ -90,8 +126,25 @@ impl Metadata {
         Self::for_checksum(crc32fast::hash(body))
     }
 
+    /// Returns `Ok(())` if the given archive body matches the checksum in this metadata.
+    ///
+    /// Otherwise it returns an error with a custom message about the checksum mismatch.
+    fn assert_checksum(&self, body: &[u8]) -> anyhow::Result<()> {
+        let checksum = crc32fast::hash(body).to_be_bytes();
+
+        if self.checksum != checksum {
+            Err(anyhow::anyhow!(
+                "Checksum for given body [{:08x}] did not match checksum from the file metadata [{:08x}]",
+                u32::from_be_bytes(checksum),
+                u32::from_be_bytes(self.checksum),
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
     /// Return true if the given archive body matches the checksum in this metadata.
-    #[allow(dead_code)] // TODO: read command
+    #[cfg(test)]
     fn matches_body(&self, body: &[u8]) -> bool {
         let checksum = crc32fast::hash(body).to_be_bytes();
         self.checksum == checksum
@@ -152,6 +205,37 @@ impl<W: Write + Seek> ArchiveWriter<W> {
         self.inner.write_all(metadata.as_bytes())?;
 
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct ArchiveReader<R> {
+    metadata: Metadata,
+    inner: BufReader<R>,
+}
+
+impl<R: Read> Read for ArchiveReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.inner.read(buf)
+    }
+}
+
+impl<R: Read> BufRead for ArchiveReader<R> {
+    fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+        self.inner.fill_buf()
+    }
+
+    fn consume(&mut self, amt: usize) {
+        self.inner.consume(amt)
+    }
+}
+
+impl<R: Read> ArchiveReader<R> {
+    fn new(reader: R) -> anyhow::Result<Self> {
+        let mut inner = BufReader::new(reader);
+        let metadata = Metadata::from_reader(&mut inner)?;
+
+        Ok(Self { metadata, inner })
     }
 }
 

@@ -14,7 +14,7 @@ use uom::si::{
 };
 
 use super::{
-    archive::archive_value,
+    archive::write_archive_value,
     staging::{delete_staging_file, StagingFileReader, StagingFileWriter},
 };
 use crate::value::Value;
@@ -166,7 +166,8 @@ impl State {
             return Ok(());
         };
 
-        archive_value(&self.data_dir, staging_value).context("writing CBOR value to archive")?;
+        write_archive_value(&self.data_dir, staging_value)
+            .context("writing CBOR value to archive")?;
 
         delete_staging_file(&self.data_dir).context("cleaning up staging file")?;
 

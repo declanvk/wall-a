@@ -104,17 +104,15 @@ impl StagingFileReader {
     /// Open the staging file, read all the lines, and merge those JSON values together.
     ///
     /// Returns `Ok(None)` if the staging file is empty.
-    pub fn read_merged_value(data_dir: &Path) -> anyhow::Result<Option<Value<'static>>> {
+    pub fn read_merged_value(data_dir: &Path) -> anyhow::Result<Option<Value>> {
         let reader = Self::open(data_dir)?;
         let merge_settings = MergeSettings::default();
 
         let mut accum = None;
         for line in reader.inner.lines() {
             let line = line.context("reading line from staging file")?;
-            let value: Value<'_> =
+            let value: Value =
                 serde_json::from_str(&line).context("parsing JSON value from staging line")?;
-
-            let value = value.into_owned();
 
             if let Some(inner_accum) = accum.take() {
                 let merged = merge_settings.merge(inner_accum, value);

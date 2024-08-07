@@ -8,7 +8,7 @@ use serde::{
 
 use super::Value;
 
-impl<'de> Deserialize<'de> for Value<'de> {
+impl<'de> Deserialize<'de> for Value {
     #[inline]
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -17,7 +17,7 @@ impl<'de> Deserialize<'de> for Value<'de> {
         struct ValueVisitor;
 
         impl<'de> Visitor<'de> for ValueVisitor {
-            type Value = Value<'de>;
+            type Value = Value;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 formatter.write_str("any valid JSON value")
@@ -30,17 +30,17 @@ impl<'de> Deserialize<'de> for Value<'de> {
 
             #[inline]
             fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E> {
-                Ok(Value::Number(value.to_string().into()))
+                Ok(Value::Number(value.to_string()))
             }
 
             #[inline]
             fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> {
-                Ok(Value::Number(value.to_string().into()))
+                Ok(Value::Number(value.to_string()))
             }
 
             #[inline]
             fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E> {
-                Ok(Value::Number(value.to_string().into()))
+                Ok(Value::Number(value.to_string()))
             }
 
             #[inline]
@@ -52,16 +52,8 @@ impl<'de> Deserialize<'de> for Value<'de> {
             }
 
             #[inline]
-            fn visit_borrowed_str<E>(self, value: &'de str) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                Ok(Value::Number(value.into()))
-            }
-
-            #[inline]
             fn visit_string<E>(self, value: String) -> Result<Self::Value, E> {
-                Ok(Value::String(value.into()))
+                Ok(Value::String(value))
             }
 
             #[inline]
@@ -93,7 +85,7 @@ impl<'de> Deserialize<'de> for Value<'de> {
                     vec.push(elem);
                 }
 
-                Ok(Value::Array(vec.into()))
+                Ok(Value::Array(vec))
             }
 
             fn visit_map<V>(self, mut visitor: V) -> Result<Self::Value, V::Error>
@@ -108,7 +100,7 @@ impl<'de> Deserialize<'de> for Value<'de> {
                     map.insert(key, value);
                 }
 
-                Ok(Value::Object(map.into_iter().collect::<Vec<_>>().into()))
+                Ok(Value::Object(map.into_iter().collect::<Vec<_>>()))
             }
         }
 
@@ -116,7 +108,7 @@ impl<'de> Deserialize<'de> for Value<'de> {
     }
 }
 
-impl<'a> Serialize for Value<'a> {
+impl Serialize for Value {
     #[inline]
     fn serialize<S>(&self, serializer: S) -> result::Result<S::Ok, S::Error>
     where
@@ -132,7 +124,7 @@ impl<'a> Serialize for Value<'a> {
                 use serde::ser::SerializeMap;
 
                 let mut map = serializer.serialize_map(Some(m.len()))?;
-                for (k, v) in m.as_ref() {
+                for (k, v) in m {
                     map.serialize_entry(k, v)?;
                 }
                 map.end()

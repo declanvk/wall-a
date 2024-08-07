@@ -1,6 +1,6 @@
 //! This module contains functions for merge JSON and CBOR data with some configuration
 
-use std::{borrow::Cow, collections::HashMap, str::FromStr};
+use std::{collections::HashMap, str::FromStr};
 
 use indexmap::IndexSet;
 use itertools::{EitherOrBoth, Itertools};
@@ -28,7 +28,7 @@ impl MergeSettings {
     ///  - If the second value is `null`, then the [`NullBehavior`] controls the
     ///    merge behavior
     ///  - Otherwise, the second value is used
-    pub fn merge<'a>(self, accum: Value<'a>, value: Value<'a>) -> Value<'a> {
+    pub fn merge(self, accum: Value, value: Value) -> Value {
         match (accum, value) {
             // For all shared keys, merge
             (Value::Object(mut accum), Value::Object(value)) => {
@@ -52,7 +52,7 @@ impl MergeSettings {
                         EitherOrBoth::Both(accum_index, value_index) => {
                             let new_value = self
                                 .merge(accum[accum_index].1.clone(), value[value_index].1.clone());
-                            accum.to_mut()[accum_index].1 = new_value;
+                            accum[accum_index].1 = new_value;
                         }
                         EitherOrBoth::Left(_) => {
                             // do nothing in this case, since accum already has the key
@@ -60,7 +60,7 @@ impl MergeSettings {
                         EitherOrBoth::Right(value_index) => {
                             // need to extend accum in this case since there is key from value that is
                             // not already present
-                            accum.to_mut().push(value[value_index].clone())
+                            accum.push(value[value_index].clone())
                         }
                     }
                 }
@@ -68,16 +68,16 @@ impl MergeSettings {
                 Value::Object(accum)
             }
             (Value::Array(mut accum), Value::Array(value)) => {
-                let values: Cow<'_, _> = match self.array_behavior {
+                let values = match self.array_behavior {
                     // Append newer value to accumulator value
                     ArrayBehavior::Concat => {
-                        accum.to_mut().extend(value.iter().cloned());
+                        accum.extend(value.iter().cloned());
                         accum
                     }
                     // for all positions which have both, merge them. Otherwise append
                     ArrayBehavior::Merge => accum
-                        .into_iter()
-                        .zip_longest(value.into_iter())
+                        .iter()
+                        .zip_longest(value.iter())
                         .map(|pair| match pair {
                             EitherOrBoth::Both(accum, value) => {
                                 self.merge(accum.clone(), value.clone())
@@ -87,13 +87,12 @@ impl MergeSettings {
                         .collect(),
                     // Move all values through a hashset to get the unique set
                     ArrayBehavior::Union => accum
-                        .into_iter()
-                        .chain(value.into_iter())
+                        .iter()
+                        .chain(value.iter())
                         .collect::<IndexSet<_>>()
                         .into_iter()
                         .cloned()
-                        .collect::<Vec<_>>()
-                        .into(),
+                        .collect::<Vec<_>>(),
                     // Take newer value
                     ArrayBehavior::Replace => value,
                 };

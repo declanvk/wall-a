@@ -6,10 +6,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use crate::value::Value;
 use anyhow::Context;
-use serde_json::Value;
 
-use super::merge::MergeSettings;
+use super::value::merge::MergeSettings;
 
 fn staging_file_path(data_dir: &Path) -> PathBuf {
     data_dir.join("staging.jsonl")
@@ -104,18 +104,20 @@ impl StagingFileReader {
     /// Open the staging file, read all the lines, and merge those JSON values together.
     ///
     /// Returns `Ok(None)` if the staging file is empty.
-    pub fn read_merged_value(data_dir: &Path) -> anyhow::Result<Option<Value>> {
+    pub fn read_merged_value(data_dir: &Path) -> anyhow::Result<Option<Value<'static>>> {
         let reader = Self::open(data_dir)?;
         let merge_settings = MergeSettings::default();
 
         let mut accum = None;
         for line in reader.inner.lines() {
             let line = line.context("reading line from staging file")?;
-            let value: Value =
+            let value: Value<'_> =
                 serde_json::from_str(&line).context("parsing JSON value from staging line")?;
 
+            let value = value.into_owned();
+
             if let Some(inner_accum) = accum.take() {
-                let merged = merge_settings.merge_json(inner_accum, value);
+                let merged = merge_settings.merge(inner_accum, value);
 
                 accum = Some(merged);
             } else {

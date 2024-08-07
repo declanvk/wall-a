@@ -8,7 +8,6 @@ use std::{
 
 use anyhow::Context;
 use argh::FromArgs;
-use serde_json::Value;
 use uom::si::{
     information::{byte, megabyte},
     u64::Information,
@@ -16,9 +15,9 @@ use uom::si::{
 
 use super::{
     archive::archive_value,
-    convert::json_to_cbor,
     staging::{delete_staging_file, StagingFileReader, StagingFileWriter},
 };
+use crate::value::Value;
 
 fn default_staging_limit() -> Information {
     Information::new::<megabyte>(1)
@@ -101,11 +100,11 @@ impl State {
             .handle
             .read_line(&mut self.line)
             .context("reading line from stdin")?;
-        tracing::debug!(%num_bytes, "Read line with non-zero bytes");
         if num_bytes == 0 {
             tracing::debug!("Reached EOF in stdin");
             return Ok(ControlFlow::Break(()));
         }
+        tracing::trace!(%num_bytes, "Read line with non-zero bytes");
 
         let value: Value =
             serde_json::from_str(&self.line).context("converting line to JSON value")?;
@@ -127,7 +126,7 @@ impl State {
             .write_all(&self.line_bytes)
             .context("writing JSON bytes to staging")?;
         self.added_bytes += line_num_bytes;
-        tracing::debug!(%self.added_bytes, %line_num_bytes, "Wrote JSON bytes with newline to staging file");
+        tracing::trace!(%self.added_bytes, %line_num_bytes, "Wrote JSON bytes with newline to staging file");
 
         if staging_initial_len + self.added_bytes > self.staging_limit_bytes {
             tracing::info!(
@@ -167,10 +166,7 @@ impl State {
             return Ok(());
         };
 
-        let cbor_value =
-            json_to_cbor(staging_value).context("converting staging value from JSON to CBOR")?;
-
-        archive_value(&self.data_dir, cbor_value).context("writing CBOR value to archive")?;
+        archive_value(&self.data_dir, staging_value).context("writing CBOR value to archive")?;
 
         delete_staging_file(&self.data_dir).context("cleaning up staging file")?;
 

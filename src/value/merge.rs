@@ -1,10 +1,11 @@
 //! This module contains functions for merge JSON and CBOR data with some configuration
 
-use std::str::FromStr;
+use std::{borrow::Cow, collections::HashMap, str::FromStr};
 
 use indexmap::IndexSet;
 use itertools::{EitherOrBoth, Itertools};
-use serde_json::{Map, Value as JsonValue};
+
+use super::Value;
 
 /// This struct defines how JSON & CBOR values are merged
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
@@ -27,63 +28,81 @@ impl MergeSettings {
     ///  - If the second value is `null`, then the [`NullBehavior`] controls the
     ///    merge behavior
     ///  - Otherwise, the second value is used
-    pub fn merge_json(self, accum: JsonValue, value: JsonValue) -> JsonValue {
+    pub fn merge<'a>(self, accum: Value<'a>, value: Value<'a>) -> Value<'a> {
         match (accum, value) {
             // For all shared keys, merge
-            (JsonValue::Object(accum), JsonValue::Object(mut value)) => {
-                let mut result =
-                    Map::<String, JsonValue>::with_capacity(accum.len().max(value.len()));
+            (Value::Object(mut accum), Value::Object(value)) => {
+                let mut keys = HashMap::with_capacity(accum.len().max(value.len()));
 
-                for (key, accum) in accum {
-                    if value.contains_key(key.as_str()) {
-                        // For key present in both objects, merge the values
-                        let value = value.remove(key.as_str()).unwrap();
-                        result.insert((*key).into(), self.merge_json(accum, value));
-                    } else {
-                        // For key present only in the accum value, add directly
-                        result.insert((*key).into(), accum);
+                for (accum_index, (key, _)) in accum.iter().enumerate() {
+                    keys.insert(key.clone(), EitherOrBoth::Left(accum_index));
+                }
+
+                for (value_index, (key, _)) in value.iter().enumerate() {
+                    keys.entry(key.clone())
+                        .and_modify(|e| {
+                            let accum_index = e.clone().left().unwrap();
+                            *e = EitherOrBoth::Both(accum_index, value_index);
+                        })
+                        .or_insert(EitherOrBoth::Right(value_index));
+                }
+
+                for indices in keys.into_values() {
+                    match indices {
+                        EitherOrBoth::Both(accum_index, value_index) => {
+                            let new_value = self
+                                .merge(accum[accum_index].1.clone(), value[value_index].1.clone());
+                            accum.to_mut()[accum_index].1 = new_value;
+                        }
+                        EitherOrBoth::Left(_) => {
+                            // do nothing in this case, since accum already has the key
+                        }
+                        EitherOrBoth::Right(value_index) => {
+                            // need to extend accum in this case since there is key from value that is
+                            // not already present
+                            accum.to_mut().push(value[value_index].clone())
+                        }
                     }
                 }
 
-                // For keys present only in the new value, add directly
-                for (key, value) in value {
-                    result.insert((*key).into(), value);
-                }
-
-                JsonValue::Object(result)
+                Value::Object(accum)
             }
-            (JsonValue::Array(mut accum), JsonValue::Array(mut value)) => {
-                let values: Vec<_> = match self.array_behavior {
+            (Value::Array(mut accum), Value::Array(value)) => {
+                let values: Cow<'_, _> = match self.array_behavior {
                     // Append newer value to accumulator value
                     ArrayBehavior::Concat => {
-                        accum.append(&mut value);
+                        accum.to_mut().extend(value.iter().cloned());
                         accum
                     }
                     // for all positions which have both, merge them. Otherwise append
                     ArrayBehavior::Merge => accum
                         .into_iter()
-                        .zip_longest(value)
+                        .zip_longest(value.into_iter())
                         .map(|pair| match pair {
-                            EitherOrBoth::Both(accum, value) => self.merge_json(accum, value),
-                            EitherOrBoth::Left(value) | EitherOrBoth::Right(value) => value,
+                            EitherOrBoth::Both(accum, value) => {
+                                self.merge(accum.clone(), value.clone())
+                            }
+                            EitherOrBoth::Left(value) | EitherOrBoth::Right(value) => value.clone(),
                         })
                         .collect(),
                     // Move all values through a hashset to get the unique set
                     ArrayBehavior::Union => accum
                         .into_iter()
-                        .chain(value)
+                        .chain(value.into_iter())
                         .collect::<IndexSet<_>>()
                         .into_iter()
-                        .collect(),
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .into(),
                     // Take newer value
                     ArrayBehavior::Replace => value,
                 };
 
-                JsonValue::Array(values)
+                Value::Array(values)
             }
-            (accum, JsonValue::Null) => match self.null_behavior {
+            (accum, Value::Null) => match self.null_behavior {
                 NullBehavior::Ignore => accum,
-                NullBehavior::Merge => JsonValue::Null,
+                NullBehavior::Merge => Value::Null,
             },
             // Fallback rule always takes newer value
             (_, value) => value,
@@ -145,25 +164,26 @@ impl FromStr for NullBehavior {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    macro_rules! json {
+        ($input:tt) => {
+            crate::value::Value::from(::serde_json::json!($input))
+        };
+    }
 
     use super::*;
 
     #[test]
-    fn default_settings_merge_json_basic() {
+    fn default_settings_merge_basic() {
         let settings = MergeSettings::default();
         assert_eq!(settings.null_behavior, NullBehavior::Merge);
 
         assert_eq!(
-            settings.merge_json(json!("hello"), json!("world")),
+            settings.merge(json!("hello"), json!("world")),
             json!("world")
         );
-        assert_eq!(settings.merge_json(json!("hello"), json!(100)), json!(100));
-        assert_eq!(
-            settings.merge_json(json!("hello"), JsonValue::Null),
-            JsonValue::Null
-        );
-        assert_eq!(settings.merge_json(json!(100), json!(100.0)), json!(100.0));
+        assert_eq!(settings.merge(json!("hello"), json!(100)), json!(100));
+        assert_eq!(settings.merge(json!("hello"), Value::Null), Value::Null);
+        assert_eq!(settings.merge(json!(100), json!(100.0)), json!(100.0));
     }
 
     #[test]
@@ -171,35 +191,29 @@ mod tests {
         let mut settings = MergeSettings::default();
         settings.null_behavior = NullBehavior::Ignore;
 
+        assert_eq!(settings.merge(json!("hello"), Value::Null), json!("hello"));
+        assert_eq!(settings.merge(Value::Null, Value::Null), Value::Null);
         assert_eq!(
-            settings.merge_json(json!("hello"), JsonValue::Null),
-            json!("hello")
-        );
-        assert_eq!(
-            settings.merge_json(JsonValue::Null, JsonValue::Null),
-            JsonValue::Null
-        );
-        assert_eq!(
-            settings.merge_json(JsonValue::Null, json!("goodbye")),
+            settings.merge(Value::Null, json!("goodbye")),
             json!("goodbye")
         );
     }
 
     #[test]
-    fn default_settings_merge_json_arrays() {
+    fn default_settings_merge_arrays() {
         let settings = MergeSettings::default();
         assert_eq!(settings.array_behavior, ArrayBehavior::Concat);
 
-        assert_eq!(settings.merge_json(json!([]), json!([])), json!([]));
+        assert_eq!(settings.merge(json!([]), json!([])), json!([]));
         assert_eq!(
-            settings.merge_json(
+            settings.merge(
                 json!(["a", "b", "c", "d", "e"]),
                 json!(["a", "b", "d", "e", "f"])
             ),
             json!(["a", "b", "c", "d", "e", "a", "b", "d", "e", "f"])
         );
         assert_eq!(
-            settings.merge_json(
+            settings.merge(
                 json!([
                     {"hello":"sun"}, {"goodbye":"moon"}
                 ]),
@@ -218,16 +232,16 @@ mod tests {
         let mut settings = MergeSettings::default();
         settings.array_behavior = ArrayBehavior::Union;
 
-        assert_eq!(settings.merge_json(json!([]), json!([])), json!([]));
+        assert_eq!(settings.merge(json!([]), json!([])), json!([]));
         assert_eq!(
-            settings.merge_json(
+            settings.merge(
                 json!(["a", "b", "c", "d", "e"]),
                 json!(["a", "b", "d", "e", "f"])
             ),
             json!(["a", "b", "c", "d", "e", "f"])
         );
         assert_eq!(
-            settings.merge_json(
+            settings.merge(
                 json!([
                     {"hello":"sun"}, {"goodbye":"moon"}
                 ]),
@@ -244,16 +258,16 @@ mod tests {
         let mut settings = MergeSettings::default();
         settings.array_behavior = ArrayBehavior::Merge;
 
-        assert_eq!(settings.merge_json(json!([]), json!([])), json!([]));
+        assert_eq!(settings.merge(json!([]), json!([])), json!([]));
         assert_eq!(
-            settings.merge_json(
+            settings.merge(
                 json!(["a", "b", "c", "d", "e"]),
                 json!(["a", "b", "d", "e", "f"])
             ),
             json!(["a", "b", "d", "e", "f"])
         );
         assert_eq!(
-            settings.merge_json(
+            settings.merge(
                 json!([
                     {"goodbye":"sun"}, {"hello":"moon", "something": "else"}
                 ]),
@@ -272,16 +286,16 @@ mod tests {
         let mut settings = MergeSettings::default();
         settings.array_behavior = ArrayBehavior::Replace;
 
-        assert_eq!(settings.merge_json(json!([]), json!([])), json!([]));
+        assert_eq!(settings.merge(json!([]), json!([])), json!([]));
         assert_eq!(
-            settings.merge_json(
+            settings.merge(
                 json!(["a", "b", "c", "d", "e"]),
                 json!(["a", "b", "d", "e", "f"])
             ),
             json!(["a", "b", "d", "e", "f"])
         );
         assert_eq!(
-            settings.merge_json(
+            settings.merge(
                 json!([
                     {"hello":"sun"}, {"goodbye":"moon", "something": "else"}
                 ]),
@@ -296,12 +310,12 @@ mod tests {
     }
 
     #[test]
-    fn default_settings_merge_json_objects() {
+    fn default_settings_merge_objects() {
         let settings = MergeSettings::default();
 
-        assert_eq!(settings.merge_json(json!({}), json!({})), json!({}));
+        assert_eq!(settings.merge(json!({}), json!({})), json!({}));
         assert_eq!(
-            settings.merge_json(
+            settings.merge(
                 json!({
                     "hello": "sun",
                     "goodbye": "moon",
@@ -321,7 +335,7 @@ mod tests {
             })
         );
         assert_eq!(
-            settings.merge_json(
+            settings.merge(
                 json!({
                     "hello": "sun",
                     "goodbye": "moon",
@@ -336,7 +350,7 @@ mod tests {
             })
         );
         assert_eq!(
-            settings.merge_json(
+            settings.merge(
                 json!({
                     "hello": "sun",
                     "goodbye": {

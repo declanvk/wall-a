@@ -7,10 +7,9 @@ use crate::{append::AppendCommand, read::ReadCommand};
 
 mod append;
 mod archive;
-mod convert;
-mod merge;
 mod read;
 mod staging;
+mod value;
 
 /// WALL•A is a tool for incrementally storing JSON data and then
 /// compacting it once it reaches a certain size.

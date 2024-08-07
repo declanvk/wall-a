@@ -7,10 +7,11 @@ use std::{
 };
 
 use anyhow::Context;
-use ciborium::Value;
 use crc32fast::Hasher;
 use jiff::{fmt::temporal::DateTimePrinter, Timestamp};
 use zerocopy::{AsBytes, FromBytes, FromZeroes, Unaligned};
+
+use crate::value::Value;
 
 /// Write a new archive file to the given data directory, with the content of
 /// the given CBOR value.
@@ -44,13 +45,15 @@ pub fn archive_value(data_dir: &Path, value: Value) -> anyhow::Result<()> {
         .context("creating new archive file")?;
 
     // Create the writer and it will handle writing and updating the metadata
-    let mut writer = ArchiveWriter::new(archive_file).context("creating archive file writer")?;
+    let writer = ArchiveWriter::new(archive_file).context("creating archive file writer")?;
 
     // Add the CBOR value content
-    ciborium::into_writer(&value, &mut writer).context("writing CBOR value")?;
+    let mut cbor_writer = minicbor::encode::write::Writer::new(writer);
+    minicbor::encode(value, &mut cbor_writer).context("writing CBOR value")?;
 
     // Close out the metadata, write the checksum, flush the file
-    writer
+    cbor_writer
+        .into_inner()
         .finish()
         .context("finishing file and writing metadata")?;
 

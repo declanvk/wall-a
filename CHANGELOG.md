@@ -9,12 +9,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] - ReleaseDate
 
+### Added
+
+ - Added the `x86_64-unknown-linux-musl` target to the `cargo-dist` configuration to support installing
+   on systems where the glibc version is too old.
+
 ## [0.1.1] - 2024-08-08
 
 ### Added
 
  - Added `shell` and `powershell` installers to the `cargo-dist` configuration to provide easy
-   installation on compatible systems
+   installation on compatible systems.
 
 ## [0.1.0] - 2024-08-08
 

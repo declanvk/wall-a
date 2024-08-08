@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] - ReleaseDate
 
+## Added
+
+ - Added `shell` and `powershell` installers to the `cargo-dist` configuration to provide easy
+   installation on compatible systems
+
 ## [0.1.0] - 2024-08-08
 
 ### Added

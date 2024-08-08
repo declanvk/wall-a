@@ -3,6 +3,12 @@ name = "wall-a"
 version = "0.1.0"
 edition = "2021"
 
+repository = "https://github.com/declanvk/wall-a"
+description = "CLI tool for recording JSON in a compressed format"
+rust-version = "1.78"
+keywords = ["cli", "json", "merge"]
+categories = ["command-line-utilities"]
+
 [dependencies]
 anyhow = "1.0.86"
 argh = "0.1.12"
@@ -23,3 +29,21 @@ uom = { version = "0.36.0", default-features = false, features = [
 ] }
 zerocopy = { version = "0.7.35", features = ["derive"] }
 zstd = "0.13.2"
+
+# The profile that 'cargo dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
+
+# Config for 'cargo dist'
+[workspace.metadata.dist]
+# The preferred cargo-dist version to use in CI (Cargo.toml SemVer syntax)
+cargo-dist-version = "0.19.1"
+# CI backends to support
+ci = "github"
+# The installers to generate for each app
+installers = []
+# Target platforms to build apps for (Rust target-triple syntax)
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
+# Publish jobs to run in CI
+pr-run-mode = "plan"

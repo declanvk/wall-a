@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [0.1.1] - 2024-08-08
 
-## Added
+### Added
 
  - Added `shell` and `powershell` installers to the `cargo-dist` configuration to provide easy
    installation on compatible systems
